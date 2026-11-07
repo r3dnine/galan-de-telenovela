@@ -421,6 +421,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:30px;heigh
 .setrow.vol{padding-block:4px;margin-top:-4px}
 .setrow.vol>div{flex:0 0 40%}
 .sel{min-height:46px;border-radius:12px;background:var(--bg2);border:2px solid var(--line);padding:0 10px;font-size:16px;max-width:46%}
+.mic-meter{height:14px;border-radius:99px;background:var(--panel);border:1px solid var(--line);overflow:hidden}
+.mic-meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--teal),var(--gold));transition:width .06s}
 </style></head><body>
 <div id="app"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -1862,6 +1864,7 @@ function openMic(cfg) {
     '<div class="mic-live" id="micLive" aria-live="polite"></div>' +
     '<button class="mic-btn" id="micBtn" data-act="micgo" aria-label="Start listening">' + ic('mic') + '</button>' +
     '<p class="mic-hint" id="micHint">Tap the mic, then speak.</p>' +
+    (Mic.supported() ? '<button class="sp" style="align-self:center" data-act="micdiag">' + ic('mic') + ' Check my microphone</button>' : '') +
     '<div id="micRes"></div>' +
     '<div class="mic-fb" id="micFb" hidden><input id="micText" type="text" lang="es" autocomplete="off" autocapitalize="off" placeholder="Type it, or use your keyboard mic"><button class="btn gold sm" data-act="micsubmit">Check</button></div>' +
     '<div class="row" style="margin-top:12px"><button class="btn ghost" data-act="micclose">' + (cfg.skip || 'Skip') + '</button><button class="btn primary" id="micDone" data-act="micdone" hidden>Continue</button></div></div>';
@@ -1891,6 +1894,36 @@ ACT.micgo = function () {
       if (e !== 'no-speech' && e !== 'ended') showMicFallback();
     }
   });
+};
+ACT.micdiag = function () {
+  if (!mic) return;
+  if (mic.ctl) mic.ctl.stop();
+  const box = $('#micRes'); const hint = $('#micHint');
+  box.innerHTML = '<div class="mic-meter"><i id="micLvl"></i></div>';
+  hint.textContent = 'Opening your microphone…';
+  const md = navigator.mediaDevices;
+  if (!md || !md.getUserMedia) { hint.textContent = 'This browser cannot open the microphone here.'; return; }
+  md.getUserMedia({ audio: true }).then(function (st) {
+    const tr = st.getAudioTracks()[0], label = (tr && tr.label) || 'unknown microphone';
+    const AC = window.AudioContext || window.webkitAudioContext, ac = new AC(), src = ac.createMediaStreamSource(st), an = ac.createAnalyser();
+    an.fftSize = 512; src.connect(an);
+    const buf = new Uint8Array(512), t0 = performance.now(); let peak = 0;
+    hint.textContent = 'Listening to "' + label + '". Say something!';
+    const loop = function () {
+      const bar = $('#micLvl');
+      if (!bar || performance.now() - t0 > 7000) {
+        st.getTracks().forEach(function (t) { t.stop(); }); try { ac.close(); } catch (e) { /* ignore */ }
+        const h = $('#micHint');
+        if (h) h.textContent = peak < 0.02 ? '"' + label + '" is silent. Check that it is connected, unmuted, and chosen as the default input in your device settings.' : 'I can hear "' + label + '" fine. Tap the big mic and speak right after the beep.';
+        return;
+      }
+      an.getByteTimeDomainData(buf); let s = 0;
+      for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; s += x * x; }
+      const lv = Math.sqrt(s / buf.length); peak = Math.max(peak, lv); bar.style.width = Math.min(100, lv * 500) + '%';
+      requestAnimationFrame(loop);
+    };
+    loop();
+  }).catch(function (e) { hint.textContent = 'Could not open the microphone (' + (e && e.name || 'error') + '). Allow microphone access for this site in your browser, then try again.'; });
 };
 ACT.micsubmit = function () { const t = $('#micText'); if (t && t.value.trim()) micGotSpeech([t.value.trim()]); };
 function micGotSpeech(alts) {
